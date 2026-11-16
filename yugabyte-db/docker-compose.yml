@@ -2,6 +2,7 @@ services:
   yugabyte1:
     image: yugabytedb/yugabyte:latest
     container_name: yugabyte1
+    user: root   # le volume monte sur /home/yugabyte/var appartient a root
     command: >
       bash -c "/home/yugabyte/bin/yugabyted start --advertise_address=yugabyte1 --tserver_flags=ysql_enable_auth=false --daemon=false --base_dir=/home/yugabyte/var"
     ports:
@@ -23,6 +24,7 @@ services:
   yugabyte2:
     image: yugabytedb/yugabyte:latest
     container_name: yugabyte2
+    user: root   # le volume monte sur /home/yugabyte/var appartient a root
     command: >
       bash -c "/home/yugabyte/bin/yugabyted start --advertise_address=yugabyte2 --join=yugabyte1 --daemon=false --base_dir=/home/yugabyte/var"
     volumes:
@@ -32,10 +34,18 @@ services:
         condition: service_healthy
     networks:
       - labo09-network
+    restart: on-failure:3
+    healthcheck:
+      test: ["CMD-SHELL", "/home/yugabyte/bin/ysqlsh -h yugabyte2 -U yugabyte -c 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   yugabyte3:
     image: yugabytedb/yugabyte:latest
     container_name: yugabyte3
+    user: root   # le volume monte sur /home/yugabyte/var appartient a root
     command: >
       bash -c "/home/yugabyte/bin/yugabyted start --advertise_address=yugabyte3 --join=yugabyte1 --daemon=false --base_dir=/home/yugabyte/var"
     volumes:
@@ -43,8 +53,11 @@ services:
     depends_on:
       yugabyte1:
         condition: service_healthy
+      yugabyte2:
+        condition: service_healthy   # deux noeuds qui rejoignent en meme temps : l'un des deux echoue
     networks:
       - labo09-network
+    restart: on-failure:3
 
   db-init:
     image: yugabytedb/yugabyte:latest

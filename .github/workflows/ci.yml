@@ -1,0 +1,54 @@
+name: CI/CD Labo 09
+
+on: push
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cockroach-db
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Creer le fichier .env
+        run: cp .env.example .env
+
+      - name: Demarrer CockroachDB et l'application
+        run: |
+          docker network create labo09-network || true
+          docker compose up -d --build
+
+      - name: Attendre l'API
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5000/health; then exit 0; fi
+            sleep 5
+          done
+          docker compose logs --tail 100
+          exit 1
+
+      # Le script se termine avec un code non nul si le verrou laisse passer une survente :
+      # le job build-and-push ne demarre alors pas.
+      - name: Test de concurrence
+        run: docker exec python_app_2 python tests/concurrency_test.py --threads 20 --product 3
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Connexion a GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Construire et publier l'image
+        working-directory: cockroach-db
+        run: |
+          cp .env.example .env
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:latest"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"

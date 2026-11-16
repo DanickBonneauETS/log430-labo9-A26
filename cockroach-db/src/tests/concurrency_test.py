@@ -5,6 +5,7 @@ Auteurs : Gabriel C. Ullmann, Fabio Petrillo, 2025
 """
 
 import argparse
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -48,7 +49,13 @@ def create_order(barrier: threading.Barrier, host: str, endpoint: str,
         }
 
 
-def run_test(host: str, endpoint: str, n_threads: int, product_id: int, label: str) -> None:
+def get_stock(host: str, product_id: int) -> int:
+    """Return the current stock quantity of a product."""
+    rows = requests.get(f"{host}/stocks", timeout=5).json()
+    return next(r["quantity"] for r in rows if r["product_id"] == product_id)
+
+
+def run_test(host: str, endpoint: str, n_threads: int, product_id: int, label: str) -> bool:
     logger.debug(f"\n{'='*60}")
     logger.debug(f"  Stratégie : {label}")
     logger.debug(f"  Endpoint  : {endpoint}")
@@ -62,6 +69,7 @@ def run_test(host: str, endpoint: str, n_threads: int, product_id: int, label: s
     except requests.RequestException as e:
         logger.debug(f"  Impossible de réinitialiser les stocks : {e}\n")
 
+    stock_before = get_stock(host, product_id)
     barrier = threading.Barrier(n_threads)
     results = []
 
@@ -95,6 +103,13 @@ def run_test(host: str, endpoint: str, n_threads: int, product_id: int, label: s
         avg_total = round(sum(r["elapsed"] for r in results) / len(results), 3)
         logger.debug(f"  Latence moyenne (total)   : {avg_total}s")
 
+    # Le verrou tient si on n'a pas vendu plus que le stock et si le stock restant est cohérent
+    stock_after = get_stock(host, product_id)
+    ok = len(successes) <= stock_before and stock_after == stock_before - len(successes)
+    logger.debug(f"  Vérification : stock {stock_before} → {stock_after}, "
+                 f"{len(successes)} commande(s) acceptée(s) : {'OK' if ok else 'ÉCHEC'}")
+    return ok
+
 
 def main():
     parser = argparse.ArgumentParser(description="Test de concurrence – verrous distribués (CockroachDB)")
@@ -110,12 +125,14 @@ def main():
     logger.debug(f"  Threads : {args.threads}")
     logger.debug(f"  Produit : {args.product}")
 
-    run_test(args.host, "/orders/pessimistic", args.threads, args.product,
-             "Pessimiste (SELECT FOR UPDATE)")
-    run_test(args.host, "/orders/optimistic",  args.threads, args.product,
-             "Optimiste  (version + UPDATE conditionnel)")
+    ok_pessimistic = run_test(args.host, "/orders/pessimistic", args.threads, args.product,
+                              "Pessimiste (SELECT FOR UPDATE)")
+    ok_optimistic = run_test(args.host, "/orders/optimistic",  args.threads, args.product,
+                             "Optimiste  (version + UPDATE conditionnel)")
 
     logger.debug("\n✔ Tests terminés.\n")
+    if not (ok_pessimistic and ok_optimistic):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
