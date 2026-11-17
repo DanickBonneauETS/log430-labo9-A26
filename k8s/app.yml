@@ -1,0 +1,32 @@
+# Application Store Manager, reconfiguree pour joindre CockroachDB par le Service d'entree
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: labo9-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: labo9-app
+  template:
+    metadata:
+      labels:
+        app: labo9-app
+    spec:
+      containers:
+        - name: labo9-app
+          image: ghcr.io/danickbonneauets/log430-labo9-a26:latest   # image publiee par le pipeline
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: DB_HOST
+              value: cockroachdb-public    # au lieu de cockroach1
+            - name: DB_PORT
+              value: "26257"
+            - name: DB_NAME
+              value: labo09
+            - name: DB_USER
+              value: root
+            - name: PYTHONPATH
+              value: /app/src
